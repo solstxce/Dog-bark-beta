@@ -24,18 +24,31 @@
 
   <div class="relative flex flex-col items-center bg-gray-800/60 p-6 rounded-2xl shadow-lg backdrop-blur-sm w-11/12 sm:w-3/4 md:w-1/2">
     <div class="relative w-full">
-      <video id="video" autoplay playsinline class="rounded-xl border-2 border-gray-600 shadow-lg w-full"></video>
-      <canvas id="overlay" class="rounded-xl w-full h-full"></canvas>
+        <video id="video" autoplay playsinline class="rounded-xl border-2 border-gray-600 shadow-lg w-full hidden"></video>
+        <canvas id="overlay" class="rounded-xl w-full h-full hidden"></canvas>
+        <img id="processed" class="rounded-xl border-2 border-gray-600 shadow-lg w-full object-contain hidden" alt="Processed feed" />
     </div>
 
-    <p id="status" class="mt-6 text-lg font-medium text-cyan-400 transition-all duration-500">
-      Click the button below to allow camera access.
-    </p>
+    <div class="w-full mt-4 flex flex-col items-center">
+      <div class="flex gap-3">
+        <button id="use-webcam" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700">Use Webcam</button>
+        <button id="use-ip" class="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600">Use IP Stream</button>
+      </div>
 
-    <button id="permission-btn"
-      class="mt-6 px-5 py-2.5 text-lg font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-indigo-500/50">
-      🎥 Allow Camera Access
-    </button>
+      <p id="status" class="mt-4 text-lg font-medium text-cyan-400 transition-all duration-500">Choose webcam or IP stream to start.</p>
+
+      <div id="webcam-controls" class="mt-4">
+        <button id="permission-btn" class="px-5 py-2.5 text-lg font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-indigo-500/50">🎥 Allow Camera Access</button>
+      </div>
+
+      <div id="ip-controls" class="mt-4 hidden w-full max-w-md">
+        <input id="ip-input" class="w-full px-3 py-2 rounded-lg bg-gray-700 text-gray-200" placeholder="http://<ip>/stream" />
+        <div class="mt-3 flex gap-3">
+          <button id="connect-ip" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700">Connect</button>
+          <button id="stop-ip" class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 hidden">Stop</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <footer class="mt-10 text-sm text-gray-500">
@@ -45,82 +58,116 @@
   <script>
     const video = document.getElementById("video");
     const overlay = document.getElementById("overlay");
-    const ctx = overlay.getContext("2d");
+    const processed = document.getElementById("processed");
     const statusText = document.getElementById("status");
-    const permissionBtn = document.getElementById("permission-btn");
 
+    const permissionBtn = document.getElementById("permission-btn");
+    const useWebcamBtn = document.getElementById("use-webcam");
+    const useIpBtn = document.getElementById("use-ip");
+    const webcamControls = document.getElementById("webcam-controls");
+    const ipControls = document.getElementById("ip-controls");
+    const ipInput = document.getElementById("ip-input");
+    const connectIpBtn = document.getElementById("connect-ip");
+    const stopIpBtn = document.getElementById("stop-ip");
+
+    let webcamRunning = false;
+    let stopWebcamFlag = false;
+    let ipRunning = false;
+    let stopIpFlag = false;
+
+    // Mode switching
+    useWebcamBtn.addEventListener('click', () => {
+      useWebcamBtn.classList.replace('bg-gray-700', 'bg-indigo-600');
+      useIpBtn.classList.replace('bg-indigo-600', 'bg-gray-700');
+      webcamControls.classList.remove('hidden');
+      ipControls.classList.add('hidden');
+      statusText.textContent = 'Select "Allow Camera Access" to start webcam detection.';
+    });
+
+    useIpBtn.addEventListener('click', () => {
+      useIpBtn.classList.replace('bg-gray-700', 'bg-indigo-600');
+      useWebcamBtn.classList.replace('bg-indigo-600', 'bg-gray-700');
+      ipControls.classList.remove('hidden');
+      webcamControls.classList.add('hidden');
+      statusText.textContent = 'Enter IP stream URL and click Connect.';
+    });
+
+    // Webcam flow
     permissionBtn.addEventListener("click", async () => {
       statusText.textContent = "Requesting camera permission...";
       permissionBtn.disabled = true;
-      permissionBtn.classList.add("opacity-50", "cursor-not-allowed");
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         video.srcObject = stream;
+        video.classList.remove('hidden');
+        overlay.classList.add('hidden');
+        processed.classList.remove('hidden');
         statusText.textContent = "✅ Camera active! Starting detection...";
-        permissionBtn.classList.add("hidden");
-        startDetection();
+        permissionBtn.classList.add('hidden');
+        webcamRunning = true;
+        stopWebcamFlag = false;
+        startWebcamDetection();
       } catch (err) {
         statusText.textContent = "❌ Camera access denied: " + err.message;
         permissionBtn.disabled = false;
-        permissionBtn.classList.remove("opacity-50", "cursor-not-allowed");
       }
     });
 
-    function startDetection() {
-      const canvasHidden = document.createElement("canvas");
-      const hiddenCtx = canvasHidden.getContext("2d");
+    async function startWebcamDetection() {
+      const canvasHidden = document.createElement('canvas');
+      const hiddenCtx = canvasHidden.getContext('2d');
 
       async function captureFrame() {
+        if (stopWebcamFlag) return (webcamRunning = false);
+
         if (video.videoWidth === 0 || video.videoHeight === 0) {
           setTimeout(captureFrame, 500);
           return;
         }
 
-        // Sync overlay size
-        overlay.width = video.videoWidth;
-        overlay.height = video.videoHeight;
         canvasHidden.width = video.videoWidth;
         canvasHidden.height = video.videoHeight;
-
-        // Draw frame
         hiddenCtx.drawImage(video, 0, 0, canvasHidden.width, canvasHidden.height);
-        const imageData = canvasHidden.toDataURL("image/jpeg", 0.5);
+        const imageData = canvasHidden.toDataURL('image/jpeg', 0.6);
 
         try {
-          const res = await fetch("/predict", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
+          const res = await fetch('/predict', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ image: imageData }),
           });
           const data = await res.json();
 
-          // Clear old drawings
-          ctx.clearRect(0, 0, overlay.width, overlay.height);
-
-          if (data.detected && data.boxes) {
-            drawBoxes(data.boxes);
-          }
-
-          // Update status
-          if (data.detected) {
-            if (data.label === "cat") {
-              statusText.textContent = "🐱 Cat detected — barking!";
-              statusText.className = "mt-6 text-lg font-semibold text-green-400 transition-all";
-              video.className = "rounded-xl border-4 border-green-400 shadow-lg w-full";
-            } else if (data.label === "rat") {
-              statusText.textContent = "🐀 Rat detected — meowing!";
-              statusText.className = "mt-6 text-lg font-semibold text-yellow-400 transition-all";
-              video.className = "rounded-xl border-4 border-yellow-400 shadow-lg w-full";
-            }
+          if (data.error) {
+            statusText.textContent = '⚠️ ' + data.error;
           } else {
-            statusText.textContent = "No cat or rat detected.";
-            statusText.className = "mt-6 text-lg font-medium text-cyan-400 transition-all";
-            video.className = "rounded-xl border-2 border-gray-600 shadow-lg w-full";
+            // Show processed annotated image returned by server
+            if (data.image) {
+              processed.src = data.image;
+              processed.classList.remove('hidden');
+            }
+
+            // Update status and highlight
+            if (data.detected) {
+              if (data.label === 'cat') {
+                statusText.textContent = '🐱 Cat detected — barking!';
+                statusText.className = 'mt-6 text-lg font-semibold text-green-400 transition-all';
+                video.className = 'rounded-xl border-4 border-green-400 shadow-lg w-full';
+              } else if (data.label === 'rat') {
+                statusText.textContent = '🐀 Rat detected — meowing!';
+                statusText.className = 'mt-6 text-lg font-semibold text-yellow-400 transition-all';
+                video.className = 'rounded-xl border-4 border-yellow-400 shadow-lg w-full';
+              }
+            } else {
+              statusText.textContent = 'No cat or rat detected.';
+              statusText.className = 'mt-6 text-lg font-medium text-cyan-400 transition-all';
+              video.className = 'rounded-xl border-2 border-gray-600 shadow-lg w-full';
+            }
           }
         } catch (err) {
-          statusText.textContent = "⚠️ Error: " + err.message;
-          statusText.className = "mt-6 text-lg font-medium text-red-400 transition-all";
+          statusText.textContent = '⚠️ Error: ' + err.message;
+          statusText.className = 'mt-6 text-lg font-medium text-red-400 transition-all';
         }
 
         setTimeout(captureFrame, 1000);
@@ -129,18 +176,69 @@
       captureFrame();
     }
 
-    function drawBoxes(boxes) {
-      boxes.forEach((box) => {
-        const { x1, y1, x2, y2, label } = box;
-        const color = label === "cat" ? "#22c55e" : "#facc15"; // green or yellow
+    // IP stream flow
+    connectIpBtn.addEventListener('click', () => {
+      const url = ipInput.value.trim();
+      if (!url) {
+        statusText.textContent = 'Please enter a stream URL like http://<ip>/stream';
+        return;
+      }
+      stopIpFlag = false;
+      ipRunning = true;
+      connectIpBtn.classList.add('hidden');
+      stopIpBtn.classList.remove('hidden');
+      video.classList.add('hidden');
+      processed.classList.remove('hidden');
+      statusText.textContent = 'Connecting to IP stream...';
+      pollIpStream(url);
+    });
 
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 3;
-        ctx.font = "16px sans-serif";
-        ctx.fillStyle = color;
-        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-        ctx.fillText(label.toUpperCase(), x1 + 5, y1 - 8);
-      });
+    stopIpBtn.addEventListener('click', () => {
+      stopIpFlag = true;
+      ipRunning = false;
+      stopIpBtn.classList.add('hidden');
+      connectIpBtn.classList.remove('hidden');
+      statusText.textContent = 'Stopped IP stream.';
+    });
+
+    async function pollIpStream(url) {
+      if (stopIpFlag) return;
+
+      try {
+        const res = await fetch('/fetch_stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        });
+        const data = await res.json();
+
+        if (data.error) {
+          statusText.textContent = '⚠️ ' + data.error;
+        } else {
+          if (data.image) {
+            processed.src = data.image;
+            processed.classList.remove('hidden');
+          }
+
+          if (data.detected) {
+            if (data.label === 'cat') {
+              statusText.textContent = '🐱 Cat detected — barking!';
+              statusText.className = 'mt-6 text-lg font-semibold text-green-400 transition-all';
+            } else if (data.label === 'rat') {
+              statusText.textContent = '🐀 Rat detected — meowing!';
+              statusText.className = 'mt-6 text-lg font-semibold text-yellow-400 transition-all';
+            }
+          } else {
+            statusText.textContent = 'No cat or rat detected.';
+            statusText.className = 'mt-6 text-lg font-medium text-cyan-400 transition-all';
+          }
+        }
+      } catch (err) {
+        statusText.textContent = '⚠️ Error fetching IP stream: ' + err.message;
+        statusText.className = 'mt-6 text-lg font-medium text-red-400 transition-all';
+      }
+
+      setTimeout(() => { if (!stopIpFlag) pollIpStream(url); }, 1000);
     }
   </script>
 </body>
